@@ -27,15 +27,12 @@ var db *gorm.DB
 
 func initDB() {
 	var err error
-	// Lấy chuỗi kết nối từ biến môi trường (Render sẽ cung cấp cái này)
 	dsn := os.Getenv("DATABASE_URL")
 
 	if dsn != "" {
-		// Nếu có biến môi trường -> Dùng Postgres (Trên Render)
 		log.Println("Đang kết nối PostgreSQL...")
 		db, err = gorm.Open(postgres.Open(dsn), &gorm.Config{})
 	} else {
-		// Nếu không có -> Dùng SQLite (Trên máy tính cá nhân)
 		log.Println("Đang dùng SQLite local...")
 		db, err = gorm.Open(sqlite.Open("sos.db"), &gorm.Config{})
 	}
@@ -52,7 +49,6 @@ func main() {
 	gin.SetMode(gin.ReleaseMode)
 	r := gin.Default()
 
-	// CORS: Cho phép tất cả các web gọi vào
 	r.Use(cors.New(cors.Config{
 		AllowOrigins:     []string{"*"},
 		AllowMethods:     []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
@@ -62,6 +58,7 @@ func main() {
 		MaxAge:           12 * time.Hour,
 	}))
 
+	// --- API 1: Nhận tin SOS ---
 	r.POST("/api/sos", func(c *gin.Context) {
 		var input Victim
 		if err := c.ShouldBindJSON(&input); err != nil {
@@ -78,22 +75,14 @@ func main() {
 		c.JSON(http.StatusOK, gin.H{"message": "Đã nhận tín hiệu", "data": input})
 	})
 
+	// --- API 2: Lấy danh sách ---
 	r.GET("/api/sos", func(c *gin.Context) {
 		var victims []Victim
 		db.Where("status = ?", "PENDING").Order("created_at desc").Find(&victims)
 		c.JSON(http.StatusOK, victims)
 	})
 
-	r.GET("/", func(c *gin.Context) {
-		c.String(http.StatusOK, "Server SOS Running OK!")
-	})
-
-	port := os.Getenv("PORT")
-	if port == "" {
-		port = "8080"
-	}
-	r.Run(":" + port)
-
+	// --- API 3: Đánh dấu đã cứu (ĐÃ CHUYỂN LÊN TRÊN) ---
 	r.POST("/api/sos/done", func(c *gin.Context) {
 		var req struct {
 			ID   uint   `json:"id"`
@@ -105,12 +94,13 @@ func main() {
 			return
 		}
 
+		// Mã bảo mật của bạn: DBLMM
 		if req.Code != "DBLMM" {
 			c.JSON(http.StatusUnauthorized, gin.H{"error": "Sai mã đội cứu hộ!"})
 			return
 		}
 
-		// Update trạng thái trong DB
+		// Update trạng thái
 		if err := db.Model(&Victim{}).Where("id = ?", req.ID).Update("status", "SAVED").Error; err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Lỗi database"})
 			return
@@ -118,4 +108,16 @@ func main() {
 
 		c.JSON(http.StatusOK, gin.H{"message": "Đã cập nhật trạng thái thành công!"})
 	})
+
+	// --- API check server ---
+	r.GET("/", func(c *gin.Context) {
+		c.String(http.StatusOK, "Server SOS Running OK!")
+	})
+
+	// --- KHỞI ĐỘNG SERVER (DÒNG NÀY PHẢI LUÔN NẰM CUỐI CÙNG) ---
+	port := os.Getenv("PORT")
+	if port == "" {
+		port = "8080"
+	}
+	r.Run(":" + port)
 }
