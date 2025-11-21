@@ -80,7 +80,7 @@ func main() {
 
 	r.GET("/api/sos", func(c *gin.Context) {
 		var victims []Victim
-		db.Order("created_at desc").Find(&victims)
+		db.Where("status = ?", "PENDING").Order("created_at desc").Find(&victims)
 		c.JSON(http.StatusOK, victims)
 	})
 
@@ -93,4 +93,29 @@ func main() {
 		port = "8080"
 	}
 	r.Run(":" + port)
+
+	r.POST("/api/sos/done", func(c *gin.Context) {
+		var req struct {
+			ID   uint   `json:"id"`
+			Code string `json:"code"`
+		}
+
+		if err := c.ShouldBindJSON(&req); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Dữ liệu không hợp lệ"})
+			return
+		}
+
+		if req.Code != "123456" {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "Sai mã đội cứu hộ!"})
+			return
+		}
+
+		// Update trạng thái trong DB
+		if err := db.Model(&Victim{}).Where("id = ?", req.ID).Update("status", "SAVED").Error; err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Lỗi database"})
+			return
+		}
+
+		c.JSON(http.StatusOK, gin.H{"message": "Đã cập nhật trạng thái thành công!"})
+	})
 }
