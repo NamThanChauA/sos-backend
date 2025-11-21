@@ -67,18 +67,44 @@ func main() {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
-		// Mặc định nếu không gửi type thì là SOS
-		if input.Type == "" {
-			input.Type = "SOS"
-		}
-		input.Status = "PENDING"
-		input.CreatedAt = time.Now()
 
-		if result := db.Create(&input); result.Error != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Lỗi lưu database"})
+		// LOGIC CHỐNG TRÙNG LẶP (QUAN TRỌNG)
+		// Nếu SĐT này đang có tin PENDING, ta cập nhật lại tọa độ/thời gian chứ không tạo mới
+		var existing Victim
+		result := db.Where("phone = ? AND status = ?", input.Phone, "PENDING").First(&existing)
+
+		if result.Error == nil {
+			// Đã tồn tại -> Cập nhật
+			existing.Lat = input.Lat
+			existing.Long = input.Long
+			existing.Name = input.Name
+			existing.Type = input.Type
+			existing.CreatedAt = time.Now() // Làm mới thời gian
+			db.Save(&existing)
+			c.JSON(http.StatusOK, gin.H{"message": "Đã cập nhật vị trí mới", "data": existing})
+		} else {
+			// Chưa tồn tại -> Tạo mới
+			input.Status = "PENDING"
+			input.CreatedAt = time.Now()
+			db.Create(&input)
+			c.JSON(http.StatusOK, gin.H{"message": "Đã nhận tín hiệu", "data": input})
+		}
+	})
+
+	// API MỚI: Hủy tin SOS (Dùng khi người dân bấm "Gửi lại")
+	r.POST("/api/sos/cancel", func(c *gin.Context) {
+		var req struct {
+			ID    uint   `json:"id"`
+			Phone string `json:"phone"`
+		}
+		if err := c.ShouldBindJSON(&req); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Dữ liệu lỗi"})
 			return
 		}
-		c.JSON(http.StatusOK, gin.H{"message": "Đã nhận tín hiệu", "data": input})
+
+		// Xóa cứng khỏi database để dọn rác
+		db.Where("id = ? AND phone = ?", req.ID, req.Phone).Delete(&Victim{})
+		c.JSON(http.StatusOK, gin.H{"message": "Đã xóa tin cũ"})
 	})
 
 	// --- API 2: Lấy danh sách (Lấy hết PENDING) ---
