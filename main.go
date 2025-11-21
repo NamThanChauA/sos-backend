@@ -19,7 +19,8 @@ type Victim struct {
 	Name      string    `json:"name"`
 	Lat       float64   `json:"lat"`
 	Long      float64   `json:"long"`
-	Status    string    `json:"status"`
+	Status    string    `json:"status"` // PENDING, SAVED
+	Type      string    `json:"type"`   // "SOS" (Khẩn cấp) hoặc "FOOD" (Lương thực)
 	CreatedAt time.Time `json:"created_at"`
 }
 
@@ -40,6 +41,7 @@ func initDB() {
 	if err != nil {
 		log.Fatal("Lỗi kết nối Database:", err)
 	}
+	// Tự động thêm cột Type nếu chưa có
 	db.AutoMigrate(&Victim{})
 }
 
@@ -58,12 +60,16 @@ func main() {
 		MaxAge:           12 * time.Hour,
 	}))
 
-	// --- API 1: Nhận tin SOS ---
+	// --- API 1: Nhận tin ---
 	r.POST("/api/sos", func(c *gin.Context) {
 		var input Victim
 		if err := c.ShouldBindJSON(&input); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
+		}
+		// Mặc định nếu không gửi type thì là SOS
+		if input.Type == "" {
+			input.Type = "SOS"
 		}
 		input.Status = "PENDING"
 		input.CreatedAt = time.Now()
@@ -75,14 +81,15 @@ func main() {
 		c.JSON(http.StatusOK, gin.H{"message": "Đã nhận tín hiệu", "data": input})
 	})
 
-	// --- API 2: Lấy danh sách ---
+	// --- API 2: Lấy danh sách (Lấy hết PENDING) ---
 	r.GET("/api/sos", func(c *gin.Context) {
 		var victims []Victim
+		// Lấy tất cả pending, frontend sẽ tự filter theo Tab
 		db.Where("status = ?", "PENDING").Order("created_at desc").Find(&victims)
 		c.JSON(http.StatusOK, victims)
 	})
 
-	// --- API 3: Đánh dấu đã cứu (ĐÃ CHUYỂN LÊN TRÊN) ---
+	// --- API 3: Đánh dấu đã xong ---
 	r.POST("/api/sos/done", func(c *gin.Context) {
 		var req struct {
 			ID   uint   `json:"id"`
@@ -94,13 +101,11 @@ func main() {
 			return
 		}
 
-		// Mã bảo mật của bạn: DBLMM
 		if req.Code != "DBLMM" {
 			c.JSON(http.StatusUnauthorized, gin.H{"error": "Sai mã đội cứu hộ!"})
 			return
 		}
 
-		// Update trạng thái
 		if err := db.Model(&Victim{}).Where("id = ?", req.ID).Update("status", "SAVED").Error; err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Lỗi database"})
 			return
@@ -109,12 +114,10 @@ func main() {
 		c.JSON(http.StatusOK, gin.H{"message": "Đã cập nhật trạng thái thành công!"})
 	})
 
-	// --- API check server ---
 	r.GET("/", func(c *gin.Context) {
 		c.String(http.StatusOK, "Server SOS Running OK!")
 	})
 
-	// --- KHỞI ĐỘNG SERVER (DÒNG NÀY PHẢI LUÔN NẰM CUỐI CÙNG) ---
 	port := os.Getenv("PORT")
 	if port == "" {
 		port = "8080"
