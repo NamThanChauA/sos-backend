@@ -3,15 +3,16 @@ package main
 import (
 	"log"
 	"net/http"
+	"os"
 	"time"
 
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
-	"github.com/glebarez/sqlite" // <--- Đã đổi sang thư viện thuần Go
+	"github.com/glebarez/sqlite"
+	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 )
 
-// Cấu trúc dữ liệu nạn nhân
 type Victim struct {
 	ID        uint      `gorm:"primaryKey" json:"id"`
 	Phone     string    `json:"phone"`
@@ -24,13 +25,23 @@ type Victim struct {
 
 var db *gorm.DB
 
-// Hàm khởi tạo Database
 func initDB() {
 	var err error
-	// Sử dụng thư viện glebarez/sqlite không cần CGO
-	db, err = gorm.Open(sqlite.Open("sos.db"), &gorm.Config{})
+	// Lấy chuỗi kết nối từ biến môi trường (Render sẽ cung cấp cái này)
+	dsn := os.Getenv("DATABASE_URL")
+
+	if dsn != "" {
+		// Nếu có biến môi trường -> Dùng Postgres (Trên Render)
+		log.Println("Đang kết nối PostgreSQL...")
+		db, err = gorm.Open(postgres.Open(dsn), &gorm.Config{})
+	} else {
+		// Nếu không có -> Dùng SQLite (Trên máy tính cá nhân)
+		log.Println("Đang dùng SQLite local...")
+		db, err = gorm.Open(sqlite.Open("sos.db"), &gorm.Config{})
+	}
+
 	if err != nil {
-		log.Fatal("Không thể tạo Database:", err)
+		log.Fatal("Lỗi kết nối Database:", err)
 	}
 	db.AutoMigrate(&Victim{})
 }
@@ -41,7 +52,7 @@ func main() {
 	gin.SetMode(gin.ReleaseMode)
 	r := gin.Default()
 
-	// Cấu hình CORS
+	// CORS: Cho phép tất cả các web gọi vào
 	r.Use(cors.New(cors.Config{
 		AllowOrigins:     []string{"*"},
 		AllowMethods:     []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
@@ -51,7 +62,6 @@ func main() {
 		MaxAge:           12 * time.Hour,
 	}))
 
-	// API Nhận tin
 	r.POST("/api/sos", func(c *gin.Context) {
 		var input Victim
 		if err := c.ShouldBindJSON(&input); err != nil {
@@ -68,7 +78,6 @@ func main() {
 		c.JSON(http.StatusOK, gin.H{"message": "Đã nhận tín hiệu", "data": input})
 	})
 
-	// API Xem danh sách
 	r.GET("/api/sos", func(c *gin.Context) {
 		var victims []Victim
 		db.Order("created_at desc").Find(&victims)
@@ -76,9 +85,12 @@ func main() {
 	})
 
 	r.GET("/", func(c *gin.Context) {
-		c.String(http.StatusOK, "Server SOS đang chạy ngon lành!")
+		c.String(http.StatusOK, "Server SOS Running OK!")
 	})
 
-	log.Println("Server đang chạy tại http://localhost:8080")
-	r.Run(":8080")
+	port := os.Getenv("PORT")
+	if port == "" {
+		port = "8080"
+	}
+	r.Run(":" + port)
 }
