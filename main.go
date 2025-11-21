@@ -105,7 +105,7 @@ func main() {
 			return
 		}
 
-		if req.Code != "123456" {
+		if req.Code != "DBLMM" {
 			c.JSON(http.StatusUnauthorized, gin.H{"error": "Sai mã đội cứu hộ!"})
 			return
 		}
